@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:jms="http://www.mulesoft.org/schema/mule/jms"
+	xmlns:json="http://www.mulesoft.org/schema/mule/json" xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:spring="http://www.springframework.org/schema/beans" version="EE-3.6.1"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+http://www.mulesoft.org/schema/mule/jms http://www.mulesoft.org/schema/mule/jms/current/mule-jms.xsd http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-current.xsd
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/json http://www.mulesoft.org/schema/mule/json/current/mule-json.xsd">
+	<http:listener-config name="HTTP_Listener_Configuration"
+		host="localhost" port="8008" basePath="/tryCore" doc:name="HTTP Listener Configuration" />
+	<flow name="trycoreFlow">
+		<http:listener config-ref="HTTP_Listener_Configuration"
+			path="/" doc:name="HTTP" />
+
+		<set-variable variableName="input" value="#[message.payload.input]"
+			doc:name="Nilai 1" />
+		<logger level="INFO" message="nilai1 #[flowVars['input']]"
+			doc:name="Logger" />
+
+		<!-- CALL SERVICE 1 -->
+		<expression-component doc:name="Expression"> 
+		<![CDATA[ 
+			str='<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:mem="http://members.webservices.cyclos.strohalm.nl/">
+			  <soapenv:Header/>
+			  <soapenv:Body>
+			      <mem:loadByUsername>
+			        <!--Optional:-->
+			        <username>'+flowVars.input+'</username>
+			      </mem:loadByUsername>
+			  </soapenv:Body>
+			</soapenv:Envelope>'; 
+			payload=str;
+			]]>
+		</expression-component>
+
+		<http:outbound-endpoint exchange-pattern="request-response"
+			address="http://mobile:4d4pt3r@mandiri-ecash.com:19443/emoney/services/members"
+			contentType="text/xml" doc:name="HTTP" />
+
+		<byte-array-to-string-transformer
+			doc:name="Byte Array to String" />
+
+		<set-variable variableName="name" value="#[xpath://return/name]"
+			doc:name="Variable" />
+		<set-variable variableName="email" value="#[xpath://return/email]"
+			doc:name="Variable" />
+		<set-variable variableName="groupId" value="#[xpath://return/groupId]"
+			doc:name="Variable" />
+
+		<!-- VALIDATION USING CHOICE -->
+		<choice>
+			<when expression="#[flowVars['name'] == null]">
+				<!-- How to convert some variables into hashmap -->
+				<expression-component doc:name="Expression">
+					<![CDATA[
+					responseMap = new java.util.HashMap();
+					responseMap['status']="NOT MEMBER";
+					payload = responseMap;]]>
+				</expression-component>
+			</when>
+			<when expression="#[flowVars['name'] != null]">
+
+				<!-- CALL SERVICE 2 -->
+				<expression-component doc:name="Expression"> 
+					<![CDATA[ 
+						str='<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:acc="http://accounts.webservices.cyclos.strohalm.nl/">
+						   <soapenv:Header/>
+						   <soapenv:Body>
+						      <acc:searchAccountHistory>
+						         <params>
+						            <currentPage>0</currentPage>
+						            <pageSize>0</pageSize>
+						            <principal>'+flowVars.input+'</principal>
+						           </params>
+						      </acc:searchAccountHistory>
+						   </soapenv:Body>
+						</soapenv:Envelope>'; 
+						payload=str;
+						]]>
+				</expression-component>
+
+				<http:outbound-endpoint exchange-pattern="request-response"
+					address="http://mobile:info@mandiri-ecash.com:19443/emoney/services/account"
+					contentType="text/xml" doc:name="HTTP" />
+
+				<byte-array-to-string-transformer
+					doc:name="Byte Array to String" />
+
+				<set-variable variableName="balance"
+					value="#[xpath://return/accountStatus/formattedAvailableBalance]"
+					doc:name="Variable" />
+
+				<!-- How to convert some variables into hashmap -->
+				<expression-component doc:name="Expression">
+					<![CDATA[
+					responseMap = new java.util.HashMap();
+					responseMap['name']=flowVars.name;
+					responseMap['email']=flowVars.email;
+					responseMap['idGroup']=flowVars.groupId;
+					responseMap['balance']=flowVars.balance;
+					responseMap['status']="MEMBER";
+					payload = responseMap;]]>
+				</expression-component>
+			</when>
+		</choice>
+
+		<!-- then transform the object to json -->
+		<json:object-to-json-transformer
+			doc:name="Object to JSON" />
+
+		<logger level="INFO" message="#[payload]" doc:name="Logger" />
+
+	</flow>
+</mule>
